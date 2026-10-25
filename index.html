@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Find the invoices that put your GST input tax credit at risk. Upload your purchase register and GSTR-2B and get a mismatch report in Excel.">
+<title>GST Mismatch Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: ledger-paper hero card shows books vs GSTR-2B with each invoice row connected, red-pen marks for problems; then problem types, steps, comparison, privacy band. */
+  :root {
+    --bg: #F1F5F3;
+    --surface: #FFFFFF;
+    --ink: #0C1F22;
+    --muted: #4F6468;
+    --line: #D3DEDA;
+    --accent: #0A6C74;
+    --accent-ink: #FFFFFF;
+    --tint: #E3EEEA;
+    --rule: rgba(10, 108, 116, 0.10);
+    --good: #1E7B4F;
+    --bad: #D1352B;
+    --warn: #B7791F;
+    --info: #5568B0;
+    --band: #0C2E33;
+    --band-ink: #E6F2EF;
+    --band-muted: #9CBDB9;
+    --font-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0A1517; --surface: #112124; --ink: #E4EFEC; --muted: #8FA8A6; --line: #1F3538;
+      --accent: #4FC3CC; --accent-ink: #04181A; --tint: #15292C; --rule: rgba(79, 195, 204, 0.10);
+      --good: #52C58A; --bad: #FF7A6E; --warn: #E6B450; --info: #9DB0F0;
+      --band: #0F2A2E; --band-ink: #E6F2EF; --band-muted: #8FB1AD; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0A1517; --surface: #112124; --ink: #E4EFEC; --muted: #8FA8A6; --line: #1F3538;
+    --accent: #4FC3CC; --accent-ink: #04181A; --tint: #15292C; --rule: rgba(79, 195, 204, 0.10);
+    --good: #52C58A; --bad: #FF7A6E; --warn: #E6B450; --info: #9DB0F0;
+    --band: #0F2A2E; --band-ink: #E6F2EF; --band-muted: #8FB1AD; color-scheme: dark;
+  }
+
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+    padding-block: 20px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+  h1, h2, h3, p { margin: 0; }
+  h1 { font-family: var(--font-display); font-size: clamp(34px, 9vw, 54px); line-height: 1.04; font-weight: 700; letter-spacing: -0.03em; text-wrap: balance; }
+  h2 { font-family: var(--font-display); font-size: clamp(24px, 6vw, 32px); line-height: 1.15; font-weight: 650; letter-spacing: -0.02em; text-wrap: balance; }
+  h3 { font-size: 16px; font-weight: 600; }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); }
+
+  nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 650; font-size: 16px; white-space: nowrap; letter-spacing: -0.01em; display: flex; align-items: center; gap: 9px; }
+  .mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: inline-grid; place-items: center; flex: none; }
+  .mark svg { width: 16px; height: 16px; }
+
+  a.btn { display: inline-block; padding: 14px 22px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; text-align: center; transition: transform .15s ease, filter .15s ease; }
+  a.btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  a.btn.small { padding: 9px 14px; font-size: 14px; border-radius: 8px; white-space: nowrap; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .hero { display: flex; flex-direction: column; gap: 22px; }
+  .hero h1 em { font-style: normal; position: relative; white-space: nowrap; }
+  .hero h1 em svg { position: absolute; left: -2%; bottom: -0.2em; width: 104%; height: 0.32em; overflow: visible; }
+  .hero h1 em path { fill: none; stroke: var(--bad); stroke-width: 5; stroke-linecap: round; stroke-dasharray: 260; stroke-dashoffset: 0; animation: pen .9s ease-out .15s both; }
+  .hero p.sub { font-size: 18px; color: var(--muted); max-width: 52ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .cta-note { font-size: 14px; color: var(--muted); }
+
+  /* ledger card */
+  .ledger {
+    background-color: var(--surface);
+    background-image: repeating-linear-gradient(to bottom, transparent 0 35px, var(--rule) 35px 36px);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0;
+    box-shadow: 0 1px 0 var(--line), 0 18px 40px -26px rgba(12, 31, 34, 0.35);
+  }
+  .ledger-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--tint); }
+  .ledger-top .tag { font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--warn); }
+  .ledger-top .risk { font-family: var(--font-data); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .ledger-top .risk b { color: var(--bad); font-weight: 500; font-size: 20px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr); padding: 14px 18px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .cols span:last-child { text-align: right; }
+  .rows { display: flex; flex-direction: column; padding: 0 18px 12px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr); align-items: center; height: 54px; }
+  .chip { font-family: var(--font-data); font-size: 13px; padding: 8px 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
+  .chip.right { text-align: right; }
+  .chip.ghost { border-style: dashed; background: transparent; color: var(--muted); font-family: var(--font-body); font-size: 12px; }
+  .link { position: relative; height: 26px; }
+  .link::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--c); transform-origin: left center; animation: draw .8s ease-out both; }
+  .link.dash::before { border-top-style: dashed; }
+  .link i { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--c); color: #fff; font-style: normal; font-size: 13px; font-weight: 700; display: grid; place-items: center; line-height: 1; animation: pop .45s cubic-bezier(.3, 1.6, .5, 1) .25s both; }
+  .row:nth-child(2) .link::before, .row:nth-child(2) .link i { animation-delay: .1s; }
+  .row:nth-child(3) .link::before, .row:nth-child(3) .link i { animation-delay: .2s; }
+  .row:nth-child(4) .link::before, .row:nth-child(4) .link i { animation-delay: .3s; }
+  .row:nth-child(5) .link::before, .row:nth-child(5) .link i { animation-delay: .4s; }
+  .c-ok { --c: var(--good); } .c-diff { --c: var(--warn); } .c-miss { --c: var(--bad); } .c-typo { --c: var(--info); } .c-books { --c: var(--warn); }
+  .key { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 12px 18px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); background: var(--surface); }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .key b { width: 10px; height: 10px; border-radius: 50%; background: var(--c); display: inline-block; }
+
+  @keyframes draw { from { transform: scaleX(.12); opacity: .5; } to { transform: scaleX(1); opacity: 1; } }
+  @keyframes pop { from { transform: scale(.55); } to { transform: scale(1); } }
+  @keyframes pen { from { stroke-dashoffset: 260; } to { stroke-dashoffset: 0; } }
+
+  section { display: flex; flex-direction: column; gap: 24px; }
+  .problems { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .problem { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .glyph { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--c); color: #fff; font-weight: 700; font-size: 17px; line-height: 1; }
+  .problem p { color: var(--muted); margin-top: 2px; max-width: 58ch; }
+
+  .steps { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 640px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .step .n { font-family: var(--font-data); font-size: 13px; font-weight: 500; color: var(--accent); }
+  .step p { color: var(--muted); font-size: 15px; }
+  code { font-family: var(--font-data); font-size: 0.9em; background: var(--tint); padding: 1px 6px; border-radius: 4px; }
+
+  .vs { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .vs-head { display: none; }
+  .vs-row { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .vs-row:last-child { border-bottom: 0; }
+  .vs-row .what { font-weight: 600; }
+  .vs-row .them, .vs-row .us { color: var(--muted); font-size: 15px; }
+  .vs-row .us { color: var(--ink); }
+  .vs-row small { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 1px; }
+  @media (min-width: 640px) {
+    .vs-row { grid-template-columns: 150px 1fr 1fr; gap: 18px; }
+    .vs-row small { display: none; }
+    .vs-head { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 18px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--tint); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  }
+
+  .band { background: var(--band); color: var(--band-ink); border-radius: 16px; padding: 28px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .band p { color: var(--band-muted); max-width: 56ch; }
+  .band p:first-of-type { color: var(--band-ink); font-size: 17px; }
+  .final { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
+  footer { font-size: 13px; color: var(--muted); max-width: 64ch; }
+
+  @media (max-width: 359px) { .brand { white-space: normal; font-size: 15px; line-height: 1.15; } .wrap { gap: 52px; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand">
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3.2L13 4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      GST Mismatch Checker
+    </span>
+    <a class="btn small" href="checker.html">Open tool</a>
+  </nav>
+
+  <header class="hero">
+    <p class="eyebrow">For CAs and small businesses</p>
+    <h1>Find the invoices that put your GST credit <em>at risk.<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true"><path d="M3 12 C 30 4, 52 18, 80 10 S 135 4, 160 12 S 190 8, 197 10"/></svg></em></h1>
+    <p class="sub">Upload your purchase register and your GSTR-2B. Get a mismatch report in Excel in about two minutes, before you file GSTR-3B.</p>
+    <div class="cta-row">
+      <a class="btn" href="checker.html">Try it with sample data</a>
+      <span class="cta-note">No sign-up. Your files stay in your browser.</span>
+    </div>
+  </header>
+
+  <div class="ledger" role="img" aria-label="Five sample invoices matched between your books and GSTR-2B. One matches, one has a different tax amount, one is missing from GSTR-2B, one has a possible invoice number typo, and one is missing from your books.">
+    <div class="ledger-top">
+      <span class="tag">Sample · 5 of 40 invoices</span>
+      <span class="risk">ITC at risk <b id="risk-num">₹81,720</b></span>
+    </div>
+    <div class="cols"><span>Your books</span><span></span><span>GSTR-2B</span></div>
+    <div class="rows">
+      <div class="row"><span class="chip">INV/0014</span><span class="link c-ok"><i>✓</i></span><span class="chip right">INV/0014</span></div>
+      <div class="row"><span class="chip">INV/0021</span><span class="link c-diff"><i>≠</i></span><span class="chip right">INV/0021</span></div>
+      <div class="row"><span class="chip">INV/0004</span><span class="link c-miss dash"><i>✕</i></span><span class="chip ghost right">not on portal</span></div>
+      <div class="row"><span class="chip">INV/0010</span><span class="link c-typo dash"><i>?</i></span><span class="chip right">INV/9010</span></div>
+      <div class="row"><span class="chip ghost">not in books</span><span class="link c-books dash"><i>+</i></span><span class="chip right">INV/0008</span></div>
+    </div>
+    <div class="key">
+      <span style="--c:var(--good)"><b></b>Matched</span>
+      <span style="--c:var(--warn)"><b></b>Amount differs</span>
+      <span style="--c:var(--bad)"><b></b>Missing in GSTR-2B</span>
+      <span style="--c:var(--info)"><b></b>Possible typo</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>Four kinds of problems, sorted for you</h2>
+    <div class="problems">
+      <div class="problem"><span class="glyph" style="--c:var(--bad)">✕</span><div><h3>Missing in GSTR-2B</h3><p>You recorded it, the portal doesn't show it. The supplier may not have filed yet, so the credit may not be claimable.</p></div></div>
+      <div class="problem"><span class="glyph" style="--c:var(--warn)">≠</span><div><h3>Amount mismatch</h3><p>The invoice is in both files, but the tax is different. You see the exact difference in rupees.</p></div></div>
+      <div class="problem"><span class="glyph" style="--c:var(--warn)">+</span><div><h3>Missing in books</h3><p>The portal shows an invoice you never recorded. Either an entry was missed or it isn't yours.</p></div></div>
+      <div class="problem"><span class="glyph" style="--c:var(--info)">?</span><div><h3>Possible matches</h3><p>Same supplier, same amounts, slightly different invoice number. Usually a typo, and easy to fix once you see it.</p></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><span class="n">STEP 1</span><h3>Upload two files</h3><p>Your purchase register and your GSTR-2B, as Excel or CSV. Title rows, extra sheets and two-row headers are fine.</p></div>
+      <div class="step"><span class="n">STEP 2</span><h3>It matches every invoice</h3><p>Supplier GSTIN plus invoice number. Spacing, capitals and leading zeros are ignored, so <code>inv-3</code> and <code>INV/0003</code> count as the same.</p></div>
+      <div class="step"><span class="n">STEP 3</span><h3>Download the report</h3><p>One Excel file with a summary and a tab for each kind of problem, ready to send to a supplier or your CA.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why not just ask a chatbot?</h2>
+    <div class="vs">
+      <div class="vs-head"><span></span><span>General chatbot</span><span>This tool</span></div>
+      <div class="vs-row"><span class="what">Volume</span><span class="them"><small>General chatbot</small>One file at a time, with long prompts.</span><span class="us"><small>This tool</small>Hundreds of invoices in one go.</span></div>
+      <div class="vs-row"><span class="what">Your formats</span><span class="them"><small>General chatbot</small>You describe the columns every time.</span><span class="us"><small>This tool</small>Reads GSTR-2B and common register layouts on its own.</span></div>
+      <div class="vs-row"><span class="what">The result</span><span class="them"><small>General chatbot</small>A chat reply you copy and tidy.</span><span class="us"><small>This tool</small>A finished Excel report with totals.</span></div>
+      <div class="vs-row"><span class="what">Your data</span><span class="them"><small>General chatbot</small>Pasted into a chat window.</span><span class="us"><small>This tool</small>Read in your browser, not uploaded.</span></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2>Your invoices stay with you</h2>
+    <p>The matching runs inside your browser. Your files are not uploaded to a server and nothing is stored.</p>
+    <p>The tool flags differences for review. It is not tax advice, and a qualified CA should check results before any claim or filing.</p>
+  </section>
+
+  <section class="final">
+    <h2>Check your next filing before you file it.</h2>
+    <a class="btn" href="checker.html">Try it with sample data</a>
+  </section>
+
+  <footer>
+    Sample figures and GSTINs on this page are made up. The tool currently matches on supplier GSTIN and invoice number, and does not yet treat credit notes or amended invoices separately.
+  </footer>
+</div>
+
+<script>
+/* Count the sample total up once on load. The final figure is already in the page, so nothing depends on this. */
+(function () {
+  var el = document.getElementById("risk-num");
+  if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var target = 81720, start = null, dur = 1100;
+  function frame(t) {
+    if (start === null) start = t;
+    var k = Math.min(1, (t - start) / dur), eased = 1 - Math.pow(1 - k, 3);
+    el.textContent = "₹" + Math.round(target * eased).toLocaleString("en-IN");
+    if (k < 1) requestAnimationFrame(frame); else el.textContent = "₹81,720";
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
